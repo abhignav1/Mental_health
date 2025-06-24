@@ -1,0 +1,193 @@
+---
+title: "Tools for BA"
+output: html_document
+date: "2025-06-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+# libraries
+
+#library(tidyverse)
+#library(caret)
+#library(xgboost)
+
+# Load the data
+
+#data <- read_csv("C:/Users/av1265/Downloads/digital_diet_mental_health.csv")
+
+# Feature Engineering of the dataset
+#data <- data %>%
+ # mutate(
+  # burnout_risk = ifelse(mental_health_score < 50, 1, 0),
+   # screen_per_hour_awake = daily_screen_time_hours / (24 - sleep_duration_hours),
+  #  stress_to_sleep_ratio = stress_level / sleep_duration_hours
+  # )
+
+# Remove user_id and mental_health_score 
+# data <- data %>%
+#  select(-user_id, -mental_health_score)
+
+# Split data
+# set.seed(42)
+# train_index <- createDataPartition(data$burnout_risk, p = 0.8, list = FALSE)
+# train <- data[train_index, ]
+# test <- data[-train_index, ]
+
+# Separate features and target
+# train_y <- train$burnout_risk
+# test_y <- test$burnout_risk
+# train_x <- train %>% select(-burnout_risk)
+# test_x <- test %>% select(-burnout_risk)
+
+# One-hot encode categorical variables
+# dummies_model <- dummyVars(" ~ .", data = train_x)
+# train_x_mat <- predict(dummies_model, newdata = train_x)
+# test_x_mat <- predict(dummies_model, newdata = test_x)
+
+# Convert to xgb.DMatrix
+# dtrain <- xgb.DMatrix(data = as.matrix(train_x_mat), label = train_y)
+# dtest <- xgb.DMatrix(data = as.matrix(test_x_mat), label = test_y)
+
+# Set XGBoost parameters
+# params <- list(
+ # objective = "binary:logistic",
+#  eval_metric = "logloss",
+ #  max_depth = 4,
+ #  eta = 0.1,
+ # subsample = 0.8,
+   # colsample_bytree = 0.8
+# )
+
+# Cross-validation to find best nrounds
+# cv <- xgb.cv(
+ # params = params,
+#  data = dtrain,
+#  nrounds = 100,
+ # nfold = 5,
+#  early_stopping_rounds = 10,
+ # verbose = 0
+# )
+
+#best_nrounds <- cv$best_iteration
+
+# Train the model
+# model <- xgboost(
+ # data = dtrain,
+ # params = params,
+  #nrounds = best_nrounds,
+ # verbose = 0
+#)
+
+# Predict and evaluate
+#pred <- predict(model, dtest)
+#pred_class <- ifelse(pred > 0.5, 1, 0)
+
+#conf_matrix <- confusionMatrix(factor(pred_class), factor(test_y))
+#print(conf_matrix)
+
+```
+```{r}
+
+```
+
+```{r}
+library(tidyverse)
+library(caret)
+library(xgboost)
+library(Matrix)
+
+# Load the data
+data <- read_csv("C:/Users/av1265/Downloads/digital_diet_mental_health.csv")
+
+# Refined Label Engineering: Drop unclear cases
+data <- data %>%
+  mutate(
+    burnout_risk = case_when(
+      mental_health_score < 45 ~ 1,
+      mental_health_score > 65 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    screen_per_hour_awake = daily_screen_time_hours / (24 - sleep_duration_hours),
+    stress_to_sleep_ratio = stress_level / sleep_duration_hours,
+    screen_stress_ratio = daily_screen_time_hours / (stress_level + 1)
+  ) %>%
+  filter(!is.na(burnout_risk)) %>%  # Remove NA labels
+  select(-user_id, -mental_health_score)
+
+# Train-test split
+set.seed(42)
+train_index <- createDataPartition(data$burnout_risk, p = 0.8, list = FALSE)
+train <- data[train_index, ]
+test <- data[-train_index, ]
+
+# Prepare X and y
+train_y <- train$burnout_risk
+test_y <- test$burnout_risk
+train_x <- train %>% select(-burnout_risk)
+test_x <- test %>% select(-burnout_risk)
+
+# One-hot encoding
+dummies_model <- dummyVars(" ~ .", data = train_x)
+train_x_mat <- as.data.frame(predict(dummies_model, newdata = train_x))
+test_x_mat <- as.data.frame(predict(dummies_model, newdata = test_x))
+
+# Remove highly correlated features
+cor_matrix <- cor(train_x_mat)
+high_cor <- findCorrelation(cor_matrix, cutoff = 0.9)
+if (length(high_cor) > 0) {
+  drop_cols <- colnames(train_x_mat)[high_cor]
+  train_x_mat <- train_x_mat[, !(colnames(train_x_mat) %in% drop_cols)]
+  test_x_mat <- test_x_mat[, !(colnames(test_x_mat) %in% drop_cols)]
+}
+
+# Convert to DMatrix
+dtrain <- xgb.DMatrix(data = as.matrix(train_x_mat), label = train_y)
+dtest <- xgb.DMatrix(data = as.matrix(test_x_mat), label = test_y)
+
+# Model parameters
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "auc",  # switched to AUC
+  max_depth = 4,
+  eta = 0.1,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+
+# Cross-validation to find best nrounds
+cv <- xgb.cv(
+  params = params,
+  data = dtrain,
+  nrounds = 200,
+  nfold = 5,
+  early_stopping_rounds = 20,
+  verbose = 0
+)
+
+# Best round and AUC
+best_nrounds <- cv$best_iteration
+best_auc <- cv$evaluation_log$test_auc_mean[best_nrounds]
+cat("Best CV AUC:", best_auc, "\n")
+
+# Train final model
+model <- xgboost(
+  data = dtrain,
+  params = params,
+  nrounds = best_nrounds,
+  verbose = 0
+)
+
+# Predict and evaluate
+pred_probs <- predict(model, dtest)
+pred_class <- ifelse(pred_probs > 0.5, 1, 0)
+
+conf_matrix <- confusionMatrix(factor(pred_class), factor(test_y))
+print(conf_matrix)
+
+```
+
