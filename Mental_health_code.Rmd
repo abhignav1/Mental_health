@@ -297,5 +297,27 @@ print(conf_matrix)
 cat("\nRMSE:", sqrt(mean((pred_score - test_y)^2)), "\n")
 
 ```
+```{r}
+library(vetiver)
+library(pins)
 
+```
+
+```{r}
+v <- vetiver_model(model, model_name = "burnout-risk-xgb")
+```
+
+
+```{r}
+b <- board_folder("my-pins", versioned = TRUE)
+b %>% vetiver_pin_write(v)
+```
+```{r}
+# Now this will work correctly
+vetiver_write_plumber(b, "burnout-risk-xgb", rsconnect = FALSE)
+
+# And this will create your Dockerfile
+vetiver_write_docker(v)
+
+```
 
