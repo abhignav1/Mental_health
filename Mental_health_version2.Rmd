@@ -1,7 +1,7 @@
 ---
-title: "Tools for BA"
+title: "x"
 output: html_document
-date: "2025-06-24"
+date: "2025-07-08"
 ---
 
 ```{r setup, include=FALSE}
@@ -9,8 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-# updated code
-
+# Set working directory
 setwd("C:/Mental_health")
 
 # Load required packages
@@ -19,10 +18,10 @@ library(caret)
 library(xgboost)
 library(Matrix)
 
-#  Read the dataset
+# Read the dataset
 data <- read_csv("C:/Users/av1265/Downloads/digital_diet_mental_health.csv")
 
-# Feature engineering: Add meaningful ratios and scores
+# Feature engineering
 data <- data %>%
   mutate(
     screen_per_hour_awake = daily_screen_time_hours / (24 - sleep_duration_hours),
@@ -31,13 +30,11 @@ data <- data %>%
     caffeine_sleep_ratio = caffeine_intake_mg_per_day / (sleep_duration_hours + 1),
     digital_exhaustion = (daily_screen_time_hours + phone_usage_hours) * stress_level / (sleep_duration_hours + 1),
     wellbeing_score = mindfulness_minutes_per_day + physical_activity_hours_per_week - caffeine_intake_mg_per_day,
-    
-    # Target variable for regression
     burnout_score = mental_health_score
   ) %>%
   select(-user_id)
 
-# Train-test split (80/20)
+# Train-test split
 set.seed(42)
 train_index <- createDataPartition(data$burnout_score, p = 0.8, list = FALSE)
 train <- data[train_index, ]
@@ -49,7 +46,7 @@ test_y <- test$burnout_score
 train_x <- train %>% select(-burnout_score)
 test_x <- test %>% select(-burnout_score)
 
-# One-hot encoding for categorical variables
+# One-hot encoding
 dummies_model <- dummyVars(" ~ .", data = train_x)
 train_x_mat <- as.data.frame(predict(dummies_model, newdata = train_x))
 test_x_mat <- as.data.frame(predict(dummies_model, newdata = test_x))
@@ -61,6 +58,8 @@ if (length(high_cor) > 0) {
   keep_cols <- setdiff(colnames(train_x_mat), colnames(train_x_mat)[high_cor])
   train_x_mat <- train_x_mat[, keep_cols]
   test_x_mat <- test_x_mat[, keep_cols]
+} else {
+  keep_cols <- colnames(train_x_mat)
 }
 nzv <- nearZeroVar(train_x_mat)
 if (length(nzv) > 0) {
@@ -68,11 +67,11 @@ if (length(nzv) > 0) {
   test_x_mat <- test_x_mat[, -nzv]
 }
 
-# Convert to DMatrix format for XGBoost
+# Convert to DMatrix
 dtrain <- xgb.DMatrix(data = as.matrix(train_x_mat), label = train_y)
 dtest <- xgb.DMatrix(data = as.matrix(test_x_mat), label = test_y)
 
-# Set model parameters for XGBoost regression
+# XGBoost parameters
 params <- list(
   objective = "reg:squarederror",
   eval_metric = "rmse",
@@ -82,7 +81,7 @@ params <- list(
   colsample_bytree = 0.9
 )
 
-# Cross-validation to find best number of rounds
+# Cross-validation
 cv <- xgb.cv(
   params = params,
   data = dtrain,
@@ -92,7 +91,7 @@ cv <- xgb.cv(
   verbose = 0
 )
 
-# Train the final model using the best iteration
+# Train final model
 best_nrounds <- cv$best_iteration
 model <- xgboost(
   data = dtrain,
@@ -101,36 +100,20 @@ model <- xgboost(
   verbose = 0
 )
 
-# Predict mental health scores on test data
+# Predict and evaluate
 pred_score <- predict(model, dtest)
-
-# Post-processing: Convert predicted scores to binary risk (classification)
-# If score < 50 → at risk (1), else not at risk (0)
 pred_class <- ifelse(pred_score < 50, 1, 0)
 true_class <- ifelse(test_y < 50, 1, 0)
-
-# Evaluate performance using confusion matrix
 conf_matrix <- confusionMatrix(factor(pred_class), factor(true_class))
 print(conf_matrix)
-
-# Also show RMSE for regression evaluation
 cat("\nRMSE:", sqrt(mean((pred_score - test_y)^2)), "\n")
 
-
-
-
-```
-
-```{r}
-#install.packages("xgboost")
-library(xgboost)
-
+# Save model and preprocessing in one RDS
+preprocessing <- list(
+  dummies_model = dummies_model,
+  keep_cols = keep_cols
+)
 xgb.save(model, "xgb_model.model")
-saveRDS(dummies_model, "dummies_model.rds")
-saveRDS(colnames(train_x_mat), "keep_cols.rds")
-
-
-
+saveRDS(preprocessing, "preprocessing.rds")
 ```
-
 
